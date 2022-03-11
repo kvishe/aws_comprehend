@@ -1,0 +1,235 @@
+{
+    "AWSTemplateFormatVersion": "2010-09-09",
+    "Metadata": {
+        "AWS::CloudFormation::Designer": {
+            "1b24fe92-3c83-4c9a-93b5-78573f237781": {
+                "size": {
+                    "width": 60,
+                    "height": 60
+                },
+                "position": {
+                    "x": 290,
+                    "y": 230
+                },
+                "z": 1,
+                "embeds": []
+            },
+            "9a0368bc-cc30-41f6-89be-af8a202e8456": {
+                "size": {
+                    "width": 60,
+                    "height": 60
+                },
+                "position": {
+                    "x": 390,
+                    "y": 60
+                },
+                "z": 1,
+                "embeds": []
+            },
+            "ea262cd4-1bf9-4a8c-be09-5241660c55b9": {
+                "size": {
+                    "width": 60,
+                    "height": 60
+                },
+                "position": {
+                    "x": 560,
+                    "y": 230
+                },
+                "z": 1,
+                "embeds": []
+            },
+            "8f1e41cd-bade-44b5-9314-1f8f9b80d257": {
+                "size": {
+                    "width": 60,
+                    "height": 60
+                },
+                "position": {
+                    "x": 700,
+                    "y": 230
+                },
+                "z": 1,
+                "embeds": []
+            },
+            "c9311a62-826e-4adc-94fc-e80229bcb8a7": {
+                "size": {
+                    "width": 60,
+                    "height": 60
+                },
+                "position": {
+                    "x": 190,
+                    "y": 60
+                },
+                "z": 1,
+                "embeds": [],
+                "isassociatedwith": [
+                    "1b24fe92-3c83-4c9a-93b5-78573f237781",
+                    "9a0368bc-cc30-41f6-89be-af8a202e8456"
+                ]
+            }
+        }
+    },
+    "Resources": {
+        "S3AccessPolicy": {
+            "Type": "AWS::IAM::Policy",
+            "Properties": {
+                "PolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Sid": "VisualEditor0",
+                            "Effect": "Allow",
+                            "Action": [
+                                "s3:GetObject",
+                                "s3:ListBucket"
+                            ],
+                            "Resource": "*"
+                        },
+                        {
+                            "Sid": "VisualEditor1",
+                            "Effect": "Allow",
+                            "Action": "s3:PutObject",
+                            "Resource": {
+                                "Fn::Sub": "arn:aws:s3:::${OutputS3}/*"
+                            }
+                        }
+                    ]
+                },
+                "PolicyName": "AmazonComprehendS3AccessPolicy",
+                "Roles": [
+                    {
+                        "Ref": "ComprehendRole"
+                    },
+                    {
+                        "Ref": "LambdaRole"
+                    }
+                ]
+            },
+            "Metadata": {
+                "AWS::CloudFormation::Designer": {
+                    "id": "c9311a62-826e-4adc-94fc-e80229bcb8a7"
+                }
+            }
+        },
+        "ComprehendRole": {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+                "AssumeRolePolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": "comprehend.amazonaws.com"
+                            },
+                            "Action": "sts:AssumeRole"
+                        }
+                    ]
+                },
+                "RoleName": "AmazonComprehendServiceRole-PII-Job"
+            },
+            "Metadata": {
+                "AWS::CloudFormation::Designer": {
+                    "id": "1b24fe92-3c83-4c9a-93b5-78573f237781"
+                }
+            }
+        },
+        "LambdaRole": {
+            "Type": "AWS::IAM::Role",
+            "Properties": {
+                "AssumeRolePolicyDocument": {
+                    "Version": "2012-10-17",
+                    "Statement": [
+                        {
+                            "Effect": "Allow",
+                            "Principal": {
+                                "Service": [
+                                    "lambda.amazonaws.com"
+                                ]
+                            },
+                            "Action": [
+                                "sts:AssumeRole"
+                            ]
+                        }
+                    ]
+                },
+                "ManagedPolicyArns": [
+                    "arn:aws:iam::aws:policy/ComprehendFullAccess"
+                ],
+                "Policies": [
+                    {
+                        "PolicyDocument": {
+                            "Version": "2012-10-17",
+                            "Statement": [
+                                {
+                                    "Sid": "VisualEditor0",
+                                    "Effect": "Allow",
+                                    "Action": "iam:PassRole",
+                                    "Resource": {
+                                        "Fn::GetAtt": [
+                                            "ComprehendRole",
+                                            "Arn"
+                                        ]
+                                    }
+                                }
+                            ]
+                        },
+                        "PolicyName": "iam-pass-role-lambda-policy"
+                    }
+                ],
+                "RoleName": "ComprehendLambdaAccessRole"
+            },
+            "Metadata": {
+                "AWS::CloudFormation::Designer": {
+                    "id": "9a0368bc-cc30-41f6-89be-af8a202e8456"
+                }
+            }
+        },
+        "Lambda": {
+            "Type": "AWS::Lambda::Function",
+            "Properties": {
+                "FunctionName": "PII-Redaction-Comprehend",
+                "Handler": "index.lambda_handler",
+                "PackageType": "Zip",
+                "Runtime": "python3.9",
+                "Timeout": 900,
+                "MemorySize": 512,
+                "Role": {
+                    "Fn::GetAtt": [
+                        "LambdaRole",
+                        "Arn"
+                    ]
+                },
+                "Code": {
+                    "ZipFile": "import json\nimport csv\nimport boto3\nimport os\nimport datetime as dt\n\ncomprehend = boto3.client(\"comprehend\")\ns3 = boto3.client(\"s3\")\ns3r = boto3.resource(\"s3\")\n\ndef lambda_handler(event, context):\n  bucket_name = event[\"bucket_name\"]\n  key_name = event[\"path\"]\n  output_s3 = os.environ[\"output_s3\"]\n  output_s3_uri = \"s3://\" + output_s3\n  data_access_role = os.environ[\"data_access_role\"]\n\n  datestamp = dt.datetime.now().strftime(\"%Y/%m/%d\")\n  timestamp = dt.datetime.now().strftime(\"%s\")\n  filename_json = \"/tmp/file_{ts}.json\".format(ts=timestamp)\n  filename_csv = \"/tmp/file_{ts}.csv\".format(ts=timestamp)\n  keyname_s3 = \"uploads/{ds}/{ts}.json\".format(ds=datestamp, ts=timestamp)\n\n  input_s3_uri = \"s3://\" + output_s3 + \"/\" + keyname_s3\n  job_name = \"pii_reduct_\" + key_name\n  json_data = []\n\n  s3_object = s3.get_object(Bucket=bucket_name, Key=key_name)\n  data = s3_object['Body'].read()\n  contents = data.decode('utf-8')\n\n  with open(filename_csv, 'a') as csv_data:\n    csv_data.write(contents)\n\n  if not validateJSON(filename_csv):\n    with open(filename_csv) as csv_data:\n      csv_reader = csv.DictReader(csv_data)\n      for csv_row in csv_reader:\n        json_data.append(csv_row)\n    \n    with open(filename_json, 'w') as json_file:\n      json_file.write(json.dumps(json_data, indent=1))\n\n    with open(filename_json, 'r') as json_file_contents:\n      response = s3.put_object(Bucket=output_s3, Key=keyname_s3, Body=json_file_contents.read())\n      \n    os.remove(filename_json) \n  else:\n    print(\"Not a csv file\")\n    source = {\n      'Bucket': bucket_name,\n      'Key': key_name\n    }\n    dest = s3r.Bucket(output_s3)\n    dest.copy(source, keyname_s3)\n\n  os.remove(filename_csv)\n  \n  response = comprehend.start_pii_entities_detection_job(\n  InputDataConfig={\n   'S3Uri': input_s3_uri,\n   'InputFormat': 'ONE_DOC_PER_LINE'\n  },\n  OutputDataConfig={\n    'S3Uri': output_s3_uri\n  },\n  Mode='ONLY_REDACTION',\n  RedactionConfig={\n    'PiiEntityTypes': [\n    'ALL'\n    ],\n    'MaskMode': 'MASK',\n    'MaskCharacter': '*'\n  },\n  DataAccessRoleArn=data_access_role,\n  JobName=job_name,\n  LanguageCode='en',\n  )\n  print(response)\n\ndef validateJSON(jsonFile):\n  try:\n    with open(jsonFile) as f:\n      json.load(f)\n  except ValueError as err:\n    return False\n  return True\n"
+                },
+                "Environment": {
+                    "Variables": {
+                        "data_access_role": {
+                            "Fn::GetAtt": [
+                                "ComprehendRole",
+                                "Arn"
+                            ]
+                        },
+                        "output_s3": {
+                            "Ref": "OutputS3"
+                        }
+                    }
+                }
+            },
+            "Metadata": {
+                "AWS::CloudFormation::Designer": {
+                    "id": "ea262cd4-1bf9-4a8c-be09-5241660c55b9"
+                }
+            }
+        },
+        "OutputS3": {
+            "Type": "AWS::S3::Bucket",
+            "Properties": {},
+            "Metadata": {
+                "AWS::CloudFormation::Designer": {
+                    "id": "8f1e41cd-bade-44b5-9314-1f8f9b80d257"
+                }
+            }
+        }
+    }
+}
